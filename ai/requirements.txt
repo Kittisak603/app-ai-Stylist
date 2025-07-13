@@ -1,4 +1,11 @@
 streamlit
+scikit-learn
+webcolors
+rembg
+backgroundremover
+opencv-python
+Pillow
+requestsstreamlit
 numpy
 scikit-learn
 pillow
@@ -8,3 +15,4 @@ rembg
 colorthief
 backgroundremover
 requests
+opencv-python

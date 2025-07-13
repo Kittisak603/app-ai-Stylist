@@ -4,21 +4,8 @@ from PIL import Image, ImageColor
 import requests
 from segmentation_utils import segment_clothes, extract_part
 
-# --- ติดตั้ง scikit-learn, webcolors, backgroundremover, opencv-python อัตโนมัติถ้าไม่มี ---
-try:
-    from sklearn.cluster import KMeans
-except ImportError:
-    import subprocess
-    import sys
-    subprocess.check_call([sys.executable, '-m', 'pip', 'install', 'scikit-learn'])
-    from sklearn.cluster import KMeans
-try:
-    import webcolors
-except ImportError:
-    import subprocess
-    import sys
-    subprocess.check_call([sys.executable, '-m', 'pip', 'install', 'webcolors'])
-    import webcolors
+from sklearn.cluster import KMeans
+import webcolors
 try:
     from backgroundremover import remove as remove_bg_sota
     BGREMOVER_AVAILABLE = True
@@ -29,68 +16,23 @@ try:
     REMBG_AVAILABLE = True
 except ImportError:
     REMBG_AVAILABLE = False
-try:
-    import cv2
-    CV2_AVAILABLE = True
-except ImportError:
-    import subprocess
-    import sys
-    subprocess.check_call([sys.executable, '-m', 'pip', 'install', 'opencv-python'])
-    import cv2
-    CV2_AVAILABLE = True
+import cv2
+CV2_AVAILABLE = True
 import io
+# Utility: Convert PIL Image to base64 for HTML display
+import base64
+from io import BytesIO
+def Image_to_base64(img):
+    buffered = BytesIO()
+    img.save(buffered, format="PNG")
+    return base64.b64encode(buffered.getvalue()).decode()
 
 # ตารางสีมาตรฐาน (ไทย, อังกฤษ, RGB, HEX)
-COLOR_TABLE = [
-    # โทนร้อน
-    {"th": "แดงสด", "en": "Crimson Red", "rgb": (220, 20, 60), "hex": "#DC143C"},
-    {"th": "ส้ม", "en": "Dark Orange", "rgb": (255, 140, 0), "hex": "#FF8C00"},
-    {"th": "เหลือง", "en": "Gold Yellow", "rgb": (255, 215, 0), "hex": "#FFD700"},
-    {"th": "ทอง", "en": "Goldenrod", "rgb": (218, 165, 32), "hex": "#DAA520"},
-    # โทนเย็น
-    {"th": "ฟ้าน้ำทะเล", "en": "Deep Sky Blue", "rgb": (0, 191, 255), "hex": "#00BFFF"},
-    {"th": "ฟ้าอ่อน", "en": "Light Blue", "rgb": (173, 216, 230), "hex": "#ADD8E6"},
-    {"th": "น้ำเงิน", "en": "Medium Blue", "rgb": (0, 0, 205), "hex": "#0000CD"},
-    {"th": "ม่วง", "en": "Blue Violet", "rgb": (138, 43, 226), "hex": "#8A2BE2"},
-    {"th": "เขียวมะนาว", "en": "Lime Green", "rgb": (50, 205, 50), "hex": "#32CD32"},
-    {"th": "เขียวเข้ม", "en": "Dark Green", "rgb": (0, 100, 0), "hex": "#006400"},
-    # พาสเทล
-    {"th": "ชมพูพาสเทล", "en": "Pastel Pink", "rgb": (255, 182, 193), "hex": "#FFB6C1"},
-    {"th": "เหลืองพาสเทล", "en": "Pastel Yellow", "rgb": (255, 255, 153), "hex": "#FFFF99"},
-    {"th": "เขียวพาสเทล", "en": "Pastel Green", "rgb": (144, 238, 144), "hex": "#90EE90"},
-    {"th": "ฟ้าพาสเทล", "en": "Pastel Blue", "rgb": (173, 216, 230), "hex": "#ADD8E6"},
-    {"th": "ม่วงพาสเทล", "en": "Pastel Purple", "rgb": (216, 191, 216), "hex": "#D8BFD8"},
-    # คลาสสิก
-    {"th": "ดำ", "en": "Black", "rgb": (0, 0, 0), "hex": "#000000"},
-    {"th": "ขาว", "en": "White", "rgb": (255, 255, 255), "hex": "#FFFFFF"},
-   # {"th": "เทา", "en": "Gray", "rgb": (128, 128, 128), "hex": "#808080"},
-    {"th": "น้ำตาล", "en": "Brown", "rgb": (139, 69, 19), "hex": "#8B4513"},
-    # โทนธรรมชาติ (Earth Tone)
-    {"th": "น้ำตาลอ่อน", "en": "Peru", "rgb": (205, 133, 63), "hex": "#CD853F"},
-    {"th": "เขียวมะกอก", "en": "Olive Drab", "rgb": (107, 142, 35), "hex": "#6B8E23"},
-    {"th": "ทราย", "en": "Sandy Brown", "rgb": (244, 164, 96), "hex": "#F4A460"},
-    {"th": "ครีม", "en": "Cream", "rgb": (255, 253, 208), "hex": "#FFFDD0"},
-    # สีมาตรฐานเดิม (บางส่วน)
-    {"th": "แดง", "en": "Red", "rgb": (255, 0, 0), "hex": "#FF0000"},
-    {"th": "เขียว", "en": "Green", "rgb": (0, 128, 0), "hex": "#008000"},
-    {"th": "น้ำเงิน", "en": "Blue", "rgb": (0, 0, 255), "hex": "#0000FF"},
-    {"th": "เหลือง", "en": "Yellow", "rgb": (255, 255, 0), "hex": "#FFFF00"},
-    {"th": "ชมพู", "en": "Pink", "rgb": (255, 192, 203), "hex": "#FFC0CB"},
-    {"th": "ส้ม", "en": "Orange", "rgb": (255, 165, 0), "hex": "#FFA500"},
-    {"th": "ม่วง", "en": "Purple", "rgb": (128, 0, 128), "hex": "#800080"},
-    {"th": "ฟ้าอ่อน", "en": "Light Blue", "rgb": (173, 216, 230), "hex": "#ADD8E6"},
-    {"th": "เทาอ่อน", "en": "Light Gray", "rgb": (211, 211, 211), "hex": "#D3D3D3"},
-   # {"th": "เทาเข้ม", "en": "Dark Gray", "rgb": (105, 105, 105), "hex": "#696969"},
-    {"th": "ครีม / เบจ", "en": "Beige", "rgb": (245, 245, 220), "hex": "#F5F5DC"},
-    {"th": "เขียวมะกอก", "en": "Olive", "rgb": (128, 128, 0), "hex": "#808000"},
-    {"th": "แดงเลือดหมู", "en": "Maroon", "rgb": (128, 0, 0), "hex": "#800000"},
-    {"th": "ฟ้าเข้ม", "en": "Navy", "rgb": (0, 0, 128), "hex": "#000080"},
-    {"th": "ฟ้าเทอร์ควอยซ์", "en": "Turquoise", "rgb": (64, 224, 208), "hex": "#40E0D0"},
-    {"th": "ทอง", "en": "Gold", "rgb": (255, 215, 0), "hex": "#FFD700"},
-    {"th": "เงิน", "en": "Silver", "rgb": (192, 192, 192), "hex": "#C0C0C0"},
-]
+from color_table_th import COLOR_TABLE_TH
 
-# ---------------- ฟังก์ชันวิเคราะห์สี ----------------
+########################################################
+# =============== Color Analysis Functions ==============
+########################################################
 def get_dominant_colors(image, k=10):
     """
     คืน dominant color (RGB) จากภาพ โดยไม่ดูดสีพื้นหลัง (pixel โปร่งใส, ขาว, เทา)
@@ -100,29 +42,80 @@ def get_dominant_colors(image, k=10):
     """
     arr = np.array(image)
     h, w = arr.shape[0], arr.shape[1]
-    # ถ้าเป็น RGBA: ใช้ alpha > 0 เป็น foreground mask
+    # ถ้าเป็น RGBA: ใช้ alpha > 0.6*255 เป็น foreground mask (กรอง pixel โปร่งใส/ขอบ)
     if arr.shape[-1] == 4:
         alpha = arr[...,3]
-        mask_fg = alpha > 0
+        mask_fg = alpha > 153  # 0.6*255
     else:
         mask_fg = np.ones((h, w), dtype=bool)
     # ใช้ connected component เพื่อหา region ที่ใหญ่สุด (คน/เสื้อผ้า)
-    try:
-        import cv2
-        mask_fg_uint8 = (mask_fg*255).astype(np.uint8)
-        num_labels, labels_im = cv2.connectedComponents(mask_fg_uint8)
-        # กรอง region เล็ก ๆ ออก (noise)
-        label_counts = np.bincount(labels_im.flatten())
-        label_counts[0] = 0
-        main_label = np.argmax(label_counts)
-        main_mask = labels_im == main_label
-        arr_fg = arr[...,:3][main_mask]
-    except Exception:
+    if 'CV2_AVAILABLE' in globals() and CV2_AVAILABLE:
+        try:
+            import cv2
+            mask_fg_uint8 = (mask_fg*255).astype(np.uint8)
+            num_labels, labels_im = cv2.connectedComponents(mask_fg_uint8)
+            label_counts = np.bincount(labels_im.flatten())
+            label_counts[0] = 0
+            main_label = np.argmax(label_counts)
+            main_mask = labels_im == main_label
+            # เฉพาะจุดศูนย์กลางของ region เท่านั้น
+            yx = np.argwhere(main_mask)
+            if len(yx) > 0:
+                cy, cx = np.median(yx, axis=0).astype(int)
+                radius = max(10, int(0.18*min(h,w)))
+                dist = np.sqrt((yx[:,0]-cy)**2 + (yx[:,1]-cx)**2)
+                central_idx = dist < radius
+                central_mask = np.zeros_like(main_mask)
+                central_mask[yx[central_idx,0], yx[central_idx,1]] = True
+                arr_fg = arr[...,:3][central_mask]
+                # เพิ่มเติม: adaptive radius
+                if len(arr_fg) < 30:
+                    radius2 = max(radius*1.8, 22)
+                    central_idx2 = dist < radius2
+                    central_mask2 = np.zeros_like(main_mask)
+                    central_mask2[yx[central_idx2,0], yx[central_idx2,1]] = True
+                    arr_fg = arr[...,:3][central_mask2]
+            else:
+                arr_fg = arr[...,:3][main_mask]
+            # กรอง pixel ที่อาจเป็นผิวหนัง (skin tone) ออก
+            skin_mask = (
+                (arr_fg[:,0]>90) & (arr_fg[:,0]<255) &
+                (arr_fg[:,1]>40) & (arr_fg[:,1]<220) &
+                (arr_fg[:,2]>30) & (arr_fg[:,2]<200) &
+                (np.abs(arr_fg[:,0]-arr_fg[:,1])<55) & (np.abs(arr_fg[:,1]-arr_fg[:,2])<55)
+            )
+            arr_fg = arr_fg[~skin_mask]
+            # เพิ่ม strict_mask: กรองขอบภาพและ pixel ผิดพลาดออก
+            strict_mask = np.ones(len(arr_fg), dtype=bool)
+            # กรอง pixel ที่อยู่ใกล้ขอบภาพ (เช่น x หรือ y ใกล้ 0 หรือ h/w)
+            if len(arr_fg) > 0:
+                # สร้าง mask จากตำแหน่ง pixel เดิม (yx)
+                # เฉพาะ pixel ที่อยู่ใน central_mask หรือ main_mask
+                # กำหนด threshold ขอบภาพ เช่น 8% ของขนาดภาพ
+                edge_thresh = int(0.08 * min(h, w))
+                # สร้างตำแหน่ง pixel ของ arr_fg
+                if 'central_mask2' in locals():
+                    mask_used = central_mask2
+                elif 'central_mask' in locals():
+                    mask_used = central_mask
+                else:
+                    mask_used = main_mask
+                yx_fg = np.argwhere(mask_used)
+                if len(yx_fg) == len(arr_fg):
+                    y, x = yx_fg[:,0], yx_fg[:,1]
+                    strict_mask &= (y > edge_thresh) & (y < h-edge_thresh) & (x > edge_thresh) & (x < w-edge_thresh)
+                arr_fg = arr_fg[strict_mask]
+        except Exception:
+            arr_fg = arr[...,:3][mask_fg]
+    else:
         arr_fg = arr[...,:3][mask_fg]
-    # กรอง pixel ขาว/เทา (background) แบบละเอียดขึ้น
+    # กรอง pixel ขาว/เทา/ดำเข้ม (background) แบบละเอียดขึ้น
     mask = ~(
         ((arr_fg[:,0]>220) & (arr_fg[:,1]>220) & (arr_fg[:,2]>220)) |  # ขาว
-        ((np.abs(arr_fg[:,0]-arr_fg[:,1])<15) & (np.abs(arr_fg[:,1]-arr_fg[:,2])<15) & (arr_fg[:,0]>80) & (arr_fg[:,0]<210)) # เทา
+        ((np.abs(arr_fg[:,0]-arr_fg[:,1])<15) & (np.abs(arr_fg[:,1]-arr_fg[:,2])<15) & (arr_fg[:,0]>80) & (arr_fg[:,0]<210)) | # เทา
+        ((arr_fg[:,0]<38) & (arr_fg[:,1]<38) & (arr_fg[:,2]<38)) |  # ดำเข้ม
+        ((arr_fg[:,0]<60) & (arr_fg[:,1]<60) & (arr_fg[:,2]>80) & (arr_fg[:,2]<140)) | # น้ำเงินเข้ม
+        ((arr_fg[:,0]<60) & (arr_fg[:,1]>80) & (arr_fg[:,1]<140) & (arr_fg[:,2]<60))   # เขียวเข้ม
     )
     arr_fg = arr_fg[mask]
     # กรอง outlier สีด้วย median filter (ลดผลกระทบจาก pixel noise)
@@ -131,7 +124,18 @@ def get_dominant_colors(image, k=10):
         arr_fg = arr_fg[np.linalg.norm(arr_fg-med, axis=1)<80]
     # ถ้า pixel foreground เหลือน้อย fallback ใช้ pixel ทั้งหมด
     if len(arr_fg) < k:
-        arr_fg = arr.reshape(-1,3)
+        # ตรวจสอบ shape ของ arr ก่อน reshape
+        arr_reshaped = None
+        if arr.ndim == 3:
+            if arr.shape[-1] == 4:
+                arr_reshaped = arr[...,:3].reshape(-1,3)
+            elif arr.shape[-1] == 3:
+                arr_reshaped = arr.reshape(-1,3)
+        if arr_reshaped is not None:
+            arr_fg = arr_reshaped
+        else:
+            # ถ้าไม่ใช่ 3 หรือ 4 channel ให้คืนค่าว่าง
+            return np.array([[220,220,220]])
     # ลดจำนวน pixel เพื่อความเร็ว
     if len(arr_fg) > 20000:
         idx = np.random.choice(len(arr_fg), 20000, replace=False)
@@ -174,149 +178,14 @@ def get_color_name(rgb_tuple):
                 continue
         return closest_name
 
-def get_color_name_th(rgb_tuple):
-    # เทียบกับ COLOR_TABLE ก่อน (ใช้ Euclidean distance)
-    min_dist = float('inf')
-    best = None
-    for c in COLOR_TABLE:
-        dist = sum((a-b)**2 for a, b in zip(rgb_tuple, c['rgb']))
-        if dist < min_dist:
-            min_dist = dist
-            best = c
-    if min_dist < 900:  # ถ้าใกล้เคียงมากพอ (เช่น ห่างไม่เกิน ~30 ต่อ channel)
-        return best['th']
-    # fallback เดิม
-    color_th = {
-        'black': 'ดำ', 'white': 'ขาว', 'red': 'แดง', 'green': 'เขียว', 'blue': 'น้ำเงิน',
-        'yellow': 'เหลือง', 'cyan': 'ฟ้าอมเขียว', 'magenta': 'ชมพู', 'gray': 'เทา',
-        'orange': 'ส้ม', 'pink': 'ชมพู', 'purple': 'ม่วง', 'brown': 'น้ำตาล',
-        'gold': 'ทอง', 'silver': 'เงิน', 'beige': 'เบจ', 'navy': 'กรมท่า',
-        'maroon': 'แดงเลือดหมู', 'olive': 'เขียวมะกอก', 'teal': 'เขียวอมฟ้า',
-        'lime': 'เขียวอ่อน', 'indigo': 'คราม', 'violet': 'ม่วงอ่อน',
-        'turquoise': 'ฟ้าอมเขียว', 'coral': 'ส้มอมชมพู', 'salmon': 'ส้มอมชมพู',
-        'khaki': 'กากี', 'lavender': 'ม่วงลาเวนเดอร์', 'skyblue': 'ฟ้า',
-        'aqua': 'ฟ้า', 'azure': 'ฟ้าอ่อน', 'ivory': 'ขาวงาช้าง', 'tan': 'น้ำตาลอ่อน',
-        'chocolate': 'น้ำตาลเข้ม', 'plum': 'ม่วงพลัม', 'orchid': 'ม่วงกล้วยไม้',
-        'crimson': 'แดงเข้ม', 'tomato': 'แดงอมส้ม', 'peachpuff': 'พีช',
-        'mintcream': 'เขียวมิ้นท์', 'aliceblue': 'ฟ้าอ่อน', 'slategray': 'เทาเข้ม',
-        'lightgray': 'เทาอ่อน', 'darkgray': 'เทาเข้ม', 'darkblue': 'น้ำเงินเข้ม',
-        'lightblue': 'ฟ้าอ่อน', 'darkgreen': 'เขียวเข้ม', 'lightgreen': 'เขียวอ่อน',
-        'darkred': 'แดงเข้ม', 'lightpink': 'ชมพูอ่อน', 'darkorange': 'ส้มเข้ม',
-        'goldenrod': 'ทองเข้ม', 'firebrick': 'แดงอิฐ', 'sienna': 'น้ำตาลแดง',
-        'rosybrown': 'น้ำตาลอมชมพู', 'peru': 'น้ำตาลทอง', 'wheat': 'ข้าวสาลี',
-        'seashell': 'ขาวเปลือกหอย', 'linen': 'ขาวลินิน', 'oldlace': 'ขาวลูกไม้',
-        'snow': 'ขาวหิมะ', 'honeydew': 'ขาวอมเขียว', 'floralwhite': 'ขาวอมเหลือง',
-        'ghostwhite': 'ขาวอมฟ้า', 'whitesmoke': 'ขาวหมอก', 'gainsboro': 'เทาอ่อน',
-        'mediumblue': 'น้ำเงินกลาง', 'mediumseagreen': 'เขียวกลาง',
-        'mediumvioletred': 'ชมพูม่วง', 'mediumorchid': 'ม่วงกลาง',
-        'mediumslateblue': 'น้ำเงินม่วง', 'mediumturquoise': 'ฟ้าอมเขียวกลาง',
-        'mediumspringgreen': 'เขียวอ่อนสด', 'mediumaquamarine': 'ฟ้าอมเขียวอ่อน',
-        'mediumpurple': 'ม่วงกลาง', 'midnightblue': 'น้ำเงินเข้มมาก',
-        'lightyellow': 'เหลืองอ่อน', 'lightgoldenrodyellow': 'เหลืองทองอ่อน',
-        'lightcoral': 'ส้มอมชมพูอ่อน', 'lightcyan': 'ฟ้าอมเขียวอ่อน',
-        'lightseagreen': 'เขียวอมฟ้าอ่อน', 'lightsalmon': 'ส้มอมชมพูอ่อน',
-        'lightsteelblue': 'ฟ้าอมเทา', 'lightgray': 'เทาอ่อน',
-        'darkslategray': 'เทาเข้ม', 'darkolivegreen': 'เขียวมะกอกเข้ม',
-        'darkmagenta': 'ม่วงเข้ม', 'darkviolet': 'ม่วงเข้ม',
-        'darkorchid': 'ม่วงเข้ม', 'darkgoldenrod': 'ทองเข้ม',
-        'darkkhaki': 'กากีเข้ม', 'darkseagreen': 'เขียวอ่อนเข้ม',
-        'darkturquoise': 'ฟ้าอมเขียวเข้ม', 'darkcyan': 'ฟ้าอมเขียวเข้ม',
-        'darkslateblue': 'น้ำเงินม่วงเข้ม', 'darkorange': 'ส้มเข้ม',
-        'darkred': 'แดงเข้ม', 'darksalmon': 'ส้มอมชมพูเข้ม',
-        'darkgray': 'เทาเข้ม', 'darkblue': 'น้ำเงินเข้ม',
-        'darkgreen': 'เขียวเข้ม', 'darkslategray': 'เทาเข้ม',
-        'darkviolet': 'ม่วงเข้ม', 'darkorchid': 'ม่วงเข้ม',
-        'darkgoldenrod': 'ทองเข้ม', 'darkkhaki': 'กากีเข้ม',
-        'darkseagreen': 'เขียวอ่อนเข้ม', 'darkturquoise': 'ฟ้าอมเขียวเข้ม',
-        'darkcyan': 'ฟ้าอมเขียวเข้ม', 'darkslateblue': 'น้ำเงินม่วงเข้ม',
-        'rebeccapurple': 'ม่วงรีเบคก้า',
-    }
-    en = get_color_name(rgb_tuple)
-    return color_th.get(en.lower(), en)
 
-# ---------------- ฟังก์ชันวิเคราะห์ความเข้ากันของสี ----------------
-def evaluate_color_match(colors):
-    scores = []
-    for i in range(len(colors)):
-        for j in range(i+1, len(colors)):
-            diff = np.linalg.norm(colors[i] - colors[j])
-            scores.append(diff)
-    avg_diff = np.mean(scores)
-    std_diff = np.std(scores)
-    min_diff = np.min(scores)
-    max_diff = np.max(scores)
-    # ปรับช่วงคะแนนให้ยืดหยุ่นขึ้น (40-90) และคำแนะนำละเอียดขึ้น
-    if avg_diff < 30:
-        return "โทนสีใกล้เคียงกันมาก เหมาะกับแนวมินิมอล/สุภาพ/เรียบหรู ดูสบายตา", 90
-    elif avg_diff < 45:
-        return "สีใกล้เคียงกัน เหมาะกับแนว casual, minimal, business casual, everyday look", 85
-    elif avg_diff < 60:
-        if std_diff < 15:
-            return "สีหลักและสีรองกลมกลืน เหมาะกับแนว smart casual, soft tone", 80
-        else:
-            return "มีสีหลักโดดเด่น สีรองช่วยเสริม เหมาะกับแนวแฟชั่น/โมเดิร์น", 75
-    elif avg_diff < 75:
-        if std_diff > 30:
-            return "สีตัดกันพอดี ดูมีสไตล์ เหมาะกับแนว creative, modern, street", 70
-        else:
-            return "สีตัดกันเล็กน้อย เพิ่มความน่าสนใจ เหมาะกับแนว everyday, pop", 68
-    elif avg_diff < 90:
-        if max_diff > 150:
-            return "สีตัดกันชัดเจน เหมาะกับแนวแฟชั่นจัดจ้าน/สายฝอ/ปาร์ตี้/experimental", 60
-        else:
-            return "สีตัดกันแรงแต่ยังดูดี เหมาะกับแนวแฟชั่น/creative/statement look", 55
-    else:
-        return "สีตัดกันแรงมาก อาจดูขัดตา เหมาะกับลุคแฟชั่นจัดเต็มหรือ experimental (ควรเลือกสีรองใหม่)", 40
+########################################################
+# =========== Color Matching & Style Evaluation =========
+########################################################
 
-# ---------------- ฟังก์ชันทำนายแนวแต่งตัว ----------------
-def predict_style(colors):
-    # วิเคราะห์จากสีหลักและสีรอง
-    main_color = colors[0]
-    if len(colors) > 1:
-        second_color = colors[1]
-    else:
-        second_color = main_color
-    r, g, b = main_color
-    r2, g2, b2 = second_color
-    # เงื่อนไขซับซ้อนขึ้นและเพิ่มสไตล์ใหม่ ๆ
-    if r < 80 and g < 80 and b < 80:
-        return "แนวเท่ (Street / ดาร์กแฟชั่น) - โทนเข้ม/ดำ/เทา"
-    elif r > 200 and g > 200 and b > 200:
-        return "แนวหวาน (Pastel / ญี่ปุ่น) - โทนขาว/พาสเทล"
-    elif r > 200 and g < 100 and b < 100:
-        if abs(r2 - r) > 80 or abs(g2 - g) > 80 or abs(b2 - b) > 80:
-            return "แนวแฟชั่นจัดจ้าน (สายฝอ/Pop) - สีสดตัดกัน"
-        else:
-            return "แนวแฟชั่นสดใส (Pop/Colorful)"
-    elif abs(r-g) < 30 and abs(g-b) < 30 and abs(r-b) < 30 and r > 150:
-        return "แนวสุภาพ/เรียบหรู (Smart Casual/Minimal) - โทนสีเดียวกัน"
-    elif (r > 180 and g > 180) or (g > 180 and b > 180) or (r > 180 and b > 180):
-        return "แนวหวาน/สดใส (Pastel/ญี่ปุ่น/เกาหลี)"
-    elif max(r, g, b) - min(r, g, b) > 150:
-        if r > 200 and g > 200 and b < 100:
-            return "แนว Summer สดใส (เหลือง/ส้ม/ฟ้า)"
-        elif r < 100 and g > 150 and b < 100:
-            return "แนว Earth Tone (เขียว/น้ำตาล/ธรรมชาติ)"
-        elif r > 200 and g < 100 and b > 200:
-            return "แนว Neon/Retro (ชมพู/ม่วง/ฟ้า)"
-        elif r < 100 and g < 100 and b > 180:
-            return "แนว Denim/Blue Jeans (น้ำเงิน/ฟ้า)"
-        elif r > 180 and g > 120 and b < 80:
-            return "แนว Autumn (น้ำตาล/ส้ม/เหลือง)"
-        elif r < 100 and g > 100 and b > 100:
-            return "แนว Winter (ฟ้า/เขียว/ขาว)"
-        elif r > 200 and g > 200 and b > 200:
-            return "แนว Spring (พาสเทล/สดใส)"
-        elif r > 180 and g > 180 and b > 180:
-            return "แนว Monochrome (ขาว/เทา/ดำ)"
-        else:
-            return "แนวแฟชั่น/สตรีท/Creative - สีตัดกันชัด"
-    elif r > 150 and g > 150 and b < 100:
-        return "แนว Luxury/Business (ทอง/เหลือง/น้ำตาล)"
-    elif r < 100 and g > 150 and b > 150:
-        return "แนว Sport/Active (ฟ้า/เขียว/น้ำเงิน)"
-    else:
-        return "แนวมินิมอล / สุภาพ / Everyday Look"
+########################################################
+# =============== Style Prediction Functions ============
+########################################################
 
 def remove_background(image):
     """
@@ -453,28 +322,6 @@ def manual_remove_bg(image, bg_color, tolerance=30):
             arr[...,3][adaptive_mask] = 0
             return Image.fromarray(arr)
 
-def call_hf_fashion_classifier(image: Image.Image):
-    """
-    ส่งภาพไปยัง HuggingFace Spaces Fashion-Classifier API และคืนค่าผลลัพธ์
-    """
-    API_URL = "https://hf.space/embed/KP-whatever/Fashion-Classifier/api/predict/"
-    import io
-    buffered = io.BytesIO()
-    image.save(buffered, format="PNG")
-    buffered.seek(0)
-    files = {"data": ("image.png", buffered, "image/png")}
-    try:
-        response = requests.post(API_URL, files=files, timeout=30)
-        if response.status_code == 200:
-            result = response.json()
-            # ปรับตามโครงสร้าง JSON ที่ได้จาก API
-            if "data" in result and len(result["data"]) > 0:
-                return result["data"][0]
-            return str(result)
-        else:
-            return f"API Error: {response.status_code}"
-    except Exception as e:
-        return f"API Error: {e}"
 
 def advanced_predict_style(colors, image=None):
     """
@@ -527,23 +374,27 @@ def refine_alpha_edges(image_rgba, method="morph+blur", ksize=3, blur_sigma=1.0)
     คืนค่า PIL Image RGBA
     ถ้าไม่มี cv2 จะคืนภาพเดิม
     """
-    try:
-        import cv2
-    except ImportError:
+    if 'CV2_AVAILABLE' in globals() and CV2_AVAILABLE:
+        try:
+            import cv2
+            arr = np.array(image_rgba)
+            alpha = arr[...,3]
+            kernel = np.ones((ksize,ksize), np.uint8)
+            alpha_morph = cv2.morphologyEx(alpha, cv2.MORPH_CLOSE, kernel)
+            alpha_blur = cv2.GaussianBlur(alpha_morph, (ksize|1,ksize|1), blur_sigma)
+            alpha_blur = cv2.GaussianBlur(alpha_blur, (ksize|1,ksize|1), blur_sigma)
+            if method == "sharpen":
+                sharp = cv2.addWeighted(alpha_blur, 1.5, cv2.GaussianBlur(alpha_blur, (0,0), 2), -0.5, 0)
+                alpha_final = np.clip(sharp, 0, 255).astype(np.uint8)
+            else:
+                alpha_final = alpha_blur
+            arr[...,3] = alpha_final
+            return Image.fromarray(arr)
+        except Exception:
+            return image_rgba
+    else:
         # ถ้าไม่มี cv2 ให้คืนภาพเดิม ไม่ error
         return image_rgba
-    arr = np.array(image_rgba)
-    alpha = arr[...,3]
-    kernel = np.ones((ksize,ksize), np.uint8)
-    alpha_morph = cv2.morphologyEx(alpha, cv2.MORPH_CLOSE, kernel)
-    alpha_blur = cv2.GaussianBlur(alpha_morph, (ksize|1,ksize|1), blur_sigma)
-    if method == "sharpen":
-        sharp = cv2.addWeighted(alpha_blur, 1.5, cv2.GaussianBlur(alpha_blur, (0,0), 2), -0.5, 0)
-        alpha_final = np.clip(sharp, 0, 255).astype(np.uint8)
-    else:
-        alpha_final = alpha_blur
-    arr[...,3] = alpha_final
-    return Image.fromarray(arr)
 
 def checkerboard_bg(img, size=8):
     """
@@ -585,29 +436,7 @@ def remove_background_modnet_api(image):
     except Exception:
         return None
 
-def remove_background_all(image):
-    """
-    ลบพื้นหลังทุกวิธี (backgroundremover, rembg)
-    คืน dict {method: PIL.Image RGBA}
-    """
-    results = {}
-    # backgroundremover
-    if BGREMOVER_AVAILABLE:
-        try:
-            img_rgba = image.convert("RGBA")
-            img_no_bg = remove_bg_sota(img_rgba)
-            results['backgroundremover'] = img_no_bg.convert("RGBA")
-        except Exception:
-            results['backgroundremover'] = None
-    # rembg
-    if REMBG_AVAILABLE:
-        try:
-            img_rgba = image.convert("RGBA")
-            img_no_bg = remove(img_rgba)
-            results['rembg'] = img_no_bg.convert("RGBA")
-        except Exception:
-            results['rembg'] = None
-    return results
+
 
 def remove_background_dynamic(image):
     """
@@ -636,12 +465,149 @@ def remove_background_dynamic(image):
             pass
     return image.convert("RGBA")
 
-# ---------------- UI ----------------
+########################################################
+# ===================== UI Section =====================
+########################################################
 st.set_page_config(page_title="AI Stylist", layout="centered")
+st.markdown("""
+<style>
+body, .main, .block-container {
+    background: linear-gradient(120deg, #f7f8fa 0%, #e3e6ff 100%);
+    font-family: 'Kanit', 'Prompt', 'Sarabun', 'Segoe UI', sans-serif;
+    color: #23263a;
+    transition: background 0.5s;
+}
+.main-title {
+    font-size: 3.2rem;
+    font-weight: 900;
+    color: #4b3aff;
+    text-shadow: 0 6px 32px #e3e6ff, 0 1px 0 #23263a22;
+    margin-bottom: 0.3em;
+    letter-spacing: 2.5px;
+    text-align: center;
+    animation: fadeInDown 1s;
+}
+.subtitle {
+    font-size: 1.35rem;
+    color: #23263a;
+    background: linear-gradient(90deg, #e3e6ff 60%, #f7f8fa88 100%);
+    border-radius: 18px;
+    box-shadow: 0 6px 32px #e3e6ff;
+    padding: 1.5em 2.5em;
+    margin-bottom: 2em;
+    text-align: center;
+    animation: fadeInUp 1.2s;
+}
+.stUpload {
+    display: flex;
+    justify-content: center;
+    margin-bottom: 2em;
+}
+.stButton > button {
+    background: linear-gradient(90deg, #4b3aff 0%, #bdbfff 100%);
+    color: #23263a;
+    font-size: 1.18rem;
+    font-weight: 700;
+    border-radius: 12px;
+    padding: 0.9em 2.5em;
+    box-shadow: 0 6px 24px #e3e6ff;
+    border: none;
+    transition: background 0.3s, box-shadow 0.3s;
+    cursor: pointer;
+}
+.stButton > button:hover {
+    background: linear-gradient(90deg, #bdbfff 0%, #4b3aff 100%);
+    box-shadow: 0 12px 40px #e3e6ff;
+}
+.stImage > img {
+    border-radius: 24px;
+    box-shadow: 0 6px 40px #e3e6ff;
+    transition: box-shadow 0.3s;
+}
+.card {
+    background: linear-gradient(120deg, #23263a 70%, #4b3aff22 100%);
+    border-radius: 26px;
+    box-shadow: 0 12px 40px #23263a55, 0 2px 12px #e3e6ff44;
+    border: 2px solid #4b3aff33;
+    padding: 2.8em 2.2em;
+    margin-bottom: 2.2em;
+    color: #f7f8fa !important;
+    position: relative;
+    overflow: hidden;
+    animation: fadeInUp 1.2s;
+    background-image: linear-gradient(120deg, #404040 80%, #4b3aff22 100%);
+    transition: box-shadow 0.3s, border 0.3s, background 0.5s;
+}
+.card::before {
+    content: "";
+    position: absolute;
+    top: -40px; left: -40px;
+    width: 120px; height: 120px;
+    background: radial-gradient(circle, #4b3aff55 0%, #8c594d00 80%);
+    z-index: 0;
+}
+.card b, .card span, .card h4 {
+    color: #23263a !important;
+    position: relative;
+    z-index: 1;
+    font-family: 'Prompt', 'Kanit', 'Sarabun', sans-serif;
+}
+.card h4 {
+    font-size: 1.25em;
+    font-weight: 800;
+    margin-bottom: 0.7em;
+    letter-spacing: 1px;
+}
+.card .color-block {
+    border-radius: 12px;
+    box-shadow: 0 2px 12px #23263a33;
+    border: 2px solid #e3e6ff;
+    width: 64px;
+    height: 64px;
+    margin-bottom: 0.5em;
+    transition: box-shadow 0.3s, border 0.3s;
+}
+.card .color-block:hover {
+    box-shadow: 0 6px 24px #4b3aff88;
+    border: 2px solid #4b3aff;
+}
+.footer {
+    text-align: center;
+    color: #4b3aff;
+    font-size: 1.18rem;
+    margin-top: 1.5em;
+    padding-bottom: 0.7em;
+    letter-spacing: 1.2px;
+    opacity: 0.88;
+    animation: fadeIn 2s;
+    font-family: 'Prompt', 'Kanit', 'Sarabun', sans-serif;
+}
+@keyframes fadeInDown {
+    from { opacity: 0; transform: translateY(-40px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+@keyframes fadeInUp {
+    from { opacity: 0; transform: translateY(40px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+</style>
+""", unsafe_allow_html=True)
 
-st.markdown('<div class="main-title">👗 AI Stylist</div>', unsafe_allow_html=True)
-st.markdown('<div class="subtitle">อัปโหลดรูปภาพการแต่งตัวของคุณ ระบบจะวิเคราะห์สีเสื้อ/กางเกงและแนะนำสีที่เหมาะสม</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-title">AI Stylist</div>', unsafe_allow_html=True)
+st.markdown('<div class="subtitle">อัปโหลดรูปภาพการแต่งตัวของคุณ ระบบจะวิเคราะห์สีเสื้อผ้าและแนะนำสีที่เหมาะสม</div>', unsafe_allow_html=True)
 
+st.markdown("""
+<style>
+.stFileUploader label {
+    color: #111111 !important;
+    font-weight: 700;
+}
+</style>
+""", unsafe_allow_html=True)
 uploaded_file = st.file_uploader("📸 เลือกรูปภาพการแต่งตัวของคุณ", type=["jpg", "jpeg", "png"], label_visibility="visible")
 
 if uploaded_file:
@@ -718,22 +684,28 @@ if uploaded_file:
     if image_nobg_bytes is None:
         bg_method = "rembg, backgroundremover, rembg(bytes-in), MODNet, Cloud API, manual_remove_bg fail"
 
-    col1, col2 = st.columns([3,1])
-    with col1:
-        st.image(image, caption="ภาพต้นฉบับที่คุณอัปโหลด", use_container_width=True)
-    with col2:
-        if image_nobg_bytes is not None:
-            st.image(checkerboard_bg(image_nobg_bytes.resize((120,120))), caption=f"Preview ตัดพื้นหลัง ({bg_method})", use_container_width=True)
+    # --- แสดงภาพต้นฉบับและ Preview ตัดพื้นหลังใน card เดียวกัน ---
+    st.markdown('<div class="card" style="display:flex;flex-direction:row;align-items:center;justify-content:center;gap:2em;">', unsafe_allow_html=True)
+    st.markdown("""
+    <div style='display:flex;flex-direction:column;align-items:center;'>
+        <img src='data:image/png;base64,{0}' style='border-radius:24px;border:3px solid #4b3aff;box-shadow:0 6px 32px #23263a;width:240px;max-width:90vw;object-fit:cover;' alt='ภาพต้นฉบับที่คุณอัปโหลด'/>
+        <div style='margin-top:0.7em;font-size:1.08em;color:#404040;font-weight:700;'>ภาพต้นฉบับที่คุณอัปโหลด</div>
+    </div>
+    """.format(
+        Image_to_base64(image)
+    ), unsafe_allow_html=True)
+    if image_nobg_bytes is not None and not (bg_method.startswith("manual_remove_bg")):
+        st.image(checkerboard_bg(image_nobg_bytes.resize((120,120))), caption=f"Preview ตัดพื้นหลัง ({bg_method})", use_container_width=False, width=120)
+    elif image_nobg_bytes is None:
+        cloud_api_dns_error = any(
+            "NameResolutionError" in msg or "Failed to resolve" in msg or "Name or service not known" in msg
+            for msg in error_msgs
+        )
+        if cloud_api_dns_error:
+            st.error("ลบพื้นหลังไม่สำเร็จทุกวิธี\nCloud API: ไม่สามารถเชื่อมต่ออินเทอร์เน็ตหรือ DNS ได้\n\nโปรดตรวจสอบการเชื่อมต่ออินเทอร์เน็ต หรือแก้ไข DNS ของ devcontainer/VM เช่น เพิ่ม nameserver 8.8.8.8 ใน /etc/resolv.conf แล้วลองใหม่อีกครั้ง\n\nรายละเอียด:\n" + "\n".join(error_msgs))
         else:
-            # If Cloud API DNS/network error, show a clear message
-            cloud_api_dns_error = any(
-                "NameResolutionError" in msg or "Failed to resolve" in msg or "Name or service not known" in msg
-                for msg in error_msgs
-            )
-            if cloud_api_dns_error:
-                st.error("ลบพื้นหลังไม่สำเร็จทุกวิธี\nCloud API: ไม่สามารถเชื่อมต่ออินเทอร์เน็ตหรือ DNS ได้\n\nโปรดตรวจสอบการเชื่อมต่ออินเทอร์เน็ต หรือแก้ไข DNS ของ devcontainer/VM เช่น เพิ่ม nameserver 8.8.8.8 ใน /etc/resolv.conf แล้วลองใหม่อีกครั้ง\n\nรายละเอียด:\n" + "\n".join(error_msgs))
-            else:
-                st.error("ลบพื้นหลังไม่สำเร็จด้วยทุกวิธี\n" + "\n".join(error_msgs) if error_msgs else "rembg (bytes), backgroundremover, rembg (bytes-in), MODNet API ลบพื้นหลังไม่สำเร็จ")
+            st.error("ลบพื้นหลังไม่สำเร็จด้วยทุกวิธี\n" + "\n".join(error_msgs) if error_msgs else "rembg (bytes), backgroundremover, rembg (bytes-in), MODNet API ลบพื้นหลังไม่สำเร็จ")
+    st.markdown('</div>', unsafe_allow_html=True)
 
     # --- Human Parsing: แยกเสื้อ/กางเกง ---
     mask = segment_clothes(image_nobg_bytes if image_nobg_bytes is not None else image)
@@ -743,41 +715,164 @@ if uploaded_file:
         lower_img = extract_part(image_nobg_bytes if image_nobg_bytes is not None else image, mask, part_labels=[6])
 
     # --- วิเคราะห์สีและแนะนำสี (เสื้อ) ---
-    st.markdown("<h4>👕 สีเสื้อ (Upper Clothes)</h4>", unsafe_allow_html=True)
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.markdown("<h4 style='color:#4b3aff;font-weight:800;'>👕 สีเสื้อ (Upper Clothes)</h4>", unsafe_allow_html=True)
     if upper_img is not None:
         upper_color = get_dominant_colors(upper_img, k=3)[0]
         upper_hex = rgb_to_hex(upper_color)
-        upper_name = get_color_name_th(upper_color)
-        st.markdown(f"<b>สีหลัก:</b> <span style='color:{upper_hex};font-weight:700;'>{upper_hex}</span> <b>{upper_name}</b>", unsafe_allow_html=True)
-        # แนะนำสีที่เหมาะสม (complementary)
+        upper_rgb = f"RGB({upper_color[0]}, {upper_color[1]}, {upper_color[2]})"
+        st.markdown("""
+        <div style='display:flex;flex-direction:row;gap:2em;'>
+          <div style='display:flex;flex-direction:column;align-items:center;'>
+            <div style='width:64px;height:64px;border-radius:10px;background:{0};border:3px solid #e3e6ff;box-shadow:0 2px 8px #23263a;'></div>
+            <div style='margin-top:0.5em;font-size:0.92em;color:#111111;font-weight:600;'>สีหลัก</div>
+            <div style='font-size:0.88em;color:#111111;'>{1}</div>
+            <div style='font-size:0.85em;color:#111111;'>{2}</div>
+          </div>
+        </div>
+        """.format(upper_hex, upper_hex, upper_rgb), unsafe_allow_html=True)
         import colorsys
         r, g, b = upper_color
         h, s, v = colorsys.rgb_to_hsv(r/255, g/255, b/255)
-        h2 = (h + 0.5) % 1.0
-        comp_rgb = tuple(int(x*255) for x in colorsys.hsv_to_rgb(h2, s, v))
+        # Complementary
+        comp_h = (h + 0.5) % 1.0
+        comp_rgb = tuple(int(x*255) for x in colorsys.hsv_to_rgb(comp_h, s, v))
         comp_hex = rgb_to_hex(comp_rgb)
-        comp_name = get_color_name_th(comp_rgb)
-        st.markdown(f"<b>สีที่แนะนำ:</b> <span style='color:{comp_hex};font-weight:700;'>{comp_hex}</span> <b>{comp_name}</b>", unsafe_allow_html=True)
+        comp_rgb_str = f"RGB({comp_rgb[0]}, {comp_rgb[1]}, {comp_rgb[2]})"
+        # Analogous
+        ana_h = (h + 0.08) % 1.0
+        ana_rgb = tuple(int(x*255) for x in colorsys.hsv_to_rgb(ana_h, s, v))
+        ana_hex = rgb_to_hex(ana_rgb)
+        ana_rgb_str = f"RGB({ana_rgb[0]}, {ana_rgb[1]}, {ana_rgb[2]})"
+        # Triadic
+        tri_h = (h + 1/3) % 1.0
+        tri_rgb = tuple(int(x*255) for x in colorsys.hsv_to_rgb(tri_h, s, v))
+        tri_hex = rgb_to_hex(tri_rgb)
+        tri_rgb_str = f"RGB({tri_rgb[0]}, {tri_rgb[1]}, {tri_rgb[2]})"
+        st.markdown("<hr style='border:1px solid #404040;margin:1em 0;'>", unsafe_allow_html=True)
+        st.markdown("<b>🎨 แนะนำสีตามทฤษฎี:</b>", unsafe_allow_html=True)
+        st.markdown("""
+        <div style='display:flex;flex-direction:row;gap:2em;'>
+          <div style='display:flex;flex-direction:column;align-items:center;'>
+            <div style='width:64px;height:64px;border-radius:10px;background:{0};border:3px solid #e3e6ff;box-shadow:0 2px 8px #23263a;'></div>
+            <div style='margin-top:0.5em;font-size:0.92em;color:#111111;font-weight:600;'>Complementary</div>
+            <div style='font-size:0.88em;color:#111111;'>{1}</div>
+            <div style='font-size:0.85em;color:#111111;'>{2}</div>
+          </div>
+          <div style='display:flex;flex-direction:column;align-items:center;'>
+            <div style='width:64px;height:64px;border-radius:10px;background:{3};border:3px solid #e3e6ff;box-shadow:0 2px 8px #23263a;'></div>
+            <div style='margin-top:0.5em;font-size:0.92em;color:#111111;font-weight:600;'>Analogous</div>
+            <div style='font-size:0.88em;color:#111111;'>{4}</div>
+            <div style='font-size:0.85em;color:#111111;'>{5}</div>
+          </div>
+          <div style='display:flex;flex-direction:column;align-items:center;'>
+            <div style='width:64px;height:64px;border-radius:10px;background:{6};border:3px solid #e3e6ff;box-shadow:0 2px 8px #23263a;'></div>
+            <div style='margin-top:0.5em;font-size:0.92em;color:#111111;font-weight:600;'>Triadic</div>
+            <div style='font-size:0.88em;color:#111111;'>{7}</div>
+            <div style='font-size:0.85em;color:#111111;'>{8}</div>
+          </div>
+        </div>
+        """.format(
+            comp_hex, comp_rgb_str, comp_hex,
+            ana_hex, ana_rgb_str, ana_hex,
+            tri_hex, tri_rgb_str, tri_hex
+        ), unsafe_allow_html=True)
+        # ไม่ต้องแสดงคำอธิบาย Analogous และ Triadic ตามที่ผู้ใช้ต้องการ
     else:
         st.info("ไม่พบส่วนเสื้อในภาพนี้")
+    st.markdown('</div>', unsafe_allow_html=True)
 
     # --- วิเคราะห์สีและแนะนำสี (กางเกง) ---
-    st.markdown("<h4>👖 สีกางเกง (Lower Clothes)</h4>", unsafe_allow_html=True)
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.markdown("<h4 style='color:#4b3aff;font-weight:800;'>👖 สีกางเกง (Lower Clothes)</h4>", unsafe_allow_html=True)
     if lower_img is not None:
         lower_color = get_dominant_colors(lower_img, k=3)[0]
         lower_hex = rgb_to_hex(lower_color)
-        lower_name = get_color_name_th(lower_color)
-        st.markdown(f"<b>สีหลัก:</b> <span style='color:{lower_hex};font-weight:700;'>{lower_hex}</span> <b>{lower_name}</b>", unsafe_allow_html=True)
-        # แนะนำสีที่เหมาะสม (complementary)
+        lower_rgb = f"RGB({lower_color[0]}, {lower_color[1]}, {lower_color[2]})"
+        st.markdown("""
+        <div style='display:flex;flex-direction:row;gap:2em;'>
+          <div style='display:flex;flex-direction:column;align-items:center;'>
+            <div style='width:64px;height:64px;border-radius:10px;background:{0};border:3px solid #e3e6ff;box-shadow:0 2px 8px #23263a;'></div>
+            <div style='margin-top:0.5em;font-size:0.92em;color:#111111;font-weight:600;'>สีหลัก</div>
+            <div style='font-size:0.88em;color:#111111;'>{1}</div>
+            <div style='font-size:0.85em;color:#111111;'>{2}</div>
+          </div>
+        </div>
+        """.format(lower_hex, lower_hex, lower_rgb), unsafe_allow_html=True)
         import colorsys
         r, g, b = lower_color
         h, s, v = colorsys.rgb_to_hsv(r/255, g/255, b/255)
-        h2 = (h + 0.5) % 1.0
-        comp_rgb = tuple(int(x*255) for x in colorsys.hsv_to_rgb(h2, s, v))
+        # Complementary
+        comp_h = (h + 0.5) % 1.0
+        comp_rgb = tuple(int(x*255) for x in colorsys.hsv_to_rgb(comp_h, s, v))
         comp_hex = rgb_to_hex(comp_rgb)
-        comp_name = get_color_name_th(comp_rgb)
-        st.markdown(f"<b>สีที่แนะนำ:</b> <span style='color:{comp_hex};font-weight:700;'>{comp_hex}</span> <b>{comp_name}</b>", unsafe_allow_html=True)
+        comp_rgb_str = f"RGB({comp_rgb[0]}, {comp_rgb[1]}, {comp_rgb[2]})"
+        # Analogous
+        ana_h = (h + 0.08) % 1.0
+        ana_rgb = tuple(int(x*255) for x in colorsys.hsv_to_rgb(ana_h, s, v))
+        ana_hex = rgb_to_hex(ana_rgb)
+        ana_rgb_str = f"RGB({ana_rgb[0]}, {ana_rgb[1]}, {ana_rgb[2]})"
+        # Triadic
+        tri_h = (h + 1/3) % 1.0
+        tri_rgb = tuple(int(x*255) for x in colorsys.hsv_to_rgb(tri_h, s, v))
+        tri_hex = rgb_to_hex(tri_rgb)
+        tri_rgb_str = f"RGB({tri_rgb[0]}, {tri_rgb[1]}, {tri_rgb[2]})"
+        st.markdown("<hr style='border:1px solid #404040;margin:1em 0;'>", unsafe_allow_html=True)
+        st.markdown("<b>🎨 แนะนำสีตามทฤษฎี:</b>", unsafe_allow_html=True)
+        st.markdown("""
+        <div style='display:flex;flex-direction:row;gap:2em;'>
+          <div style='display:flex;flex-direction:column;align-items:center;'>
+            <div style='width:64px;height:64px;border-radius:10px;background:{0};border:3px solid #e3e6ff;box-shadow:0 2px 8px #23263a;'></div>
+            <div style='margin-top:0.5em;font-size:0.92em;color:#111111;font-weight:600;'>Complementary</div>
+            <div style='font-size:0.88em;color:#111111;'>{1}</div>
+            <div style='font-size:0.85em;color:#111111;'>{2}</div>
+          </div>
+          <div style='display:flex;flex-direction:column;align-items:center;'>
+            <div style='width:64px;height:64px;border-radius:10px;background:{3};border:3px solid #e3e6ff;box-shadow:0 2px 8px #23263a;'></div>
+            <div style='margin-top:0.5em;font-size:0.92em;color:#111111;font-weight:600;'>Analogous</div>
+            <div style='font-size:0.88em;color:#111111;'>{4}</div>
+            <div style='font-size:0.85em;color:#111111;'>{5}</div>
+          </div>
+          <div style='display:flex;flex-direction:column;align-items:center;'>
+            <div style='width:64px;height:64px;border-radius:10px;background:{6};border:3px solid #e3e6ff;box-shadow:0 2px 8px #23263a;'></div>
+            <div style='margin-top:0.5em;font-size:0.92em;color:#111111;font-weight:600;'>Triadic</div>
+            <div style='font-size:0.88em;color:#111111;'>{7}</div>
+            <div style='font-size:0.85em;color:#111111;'>{8}</div>
+          </div>
+        </div>
+        """.format(
+            comp_hex, comp_rgb_str, comp_hex,
+            ana_hex, ana_rgb_str, ana_hex,
+            tri_hex, tri_rgb_str, tri_hex
+        ), unsafe_allow_html=True)
     else:
         st.info("ไม่พบส่วนกางเกงในภาพนี้")
+    st.markdown('</div>', unsafe_allow_html=True)
 
-st.markdown('<div class="footer">👨‍💻 พัฒนาโดย นักศึกษาสาขาเทคโนโลยีสารสนเทศ</div>', unsafe_allow_html=True)
+# --- ทฤษฎีสีในแฟชั่น: แสดงแบบเปิดปิด (expander) ---
+with st.expander('🎓 ทฤษฎีสีในแฟชั่น: ประเภทการจับคู่สี', expanded=False):
+    st.markdown("""
+    <b>1. Complementary (สีตรงข้าม)</b><br>
+    <span style='color:#404040;'>สีที่อยู่ตรงข้ามกันบนวงล้อสี สร้างความโดดเด่นและความคมชัด<br>เหมาะกับการออกงานที่ต้องการความโดดเด่น</span>
+    <br>
+    <b>ตัวอย่างคู่สี:</b> <br>
+    <span style='color:#ff6b6b;font-weight:700;'>แดง</span> + <span style='color:#3b82f6;font-weight:700;'>น้ำเงิน</span> &nbsp;|&nbsp; <span style='color:#fbbf24;font-weight:700;'>เหลือง</span> + <span style='color:#6366f1;font-weight:700;'>ม่วง</span> &nbsp;|&nbsp; <span style='color:#10b981;font-weight:700;'>เขียว</span> + <span style='color:#f59e42;font-weight:700;'>ส้ม</span>
+    <br><br>
+    <b>2. Analogous (สีใกล้เคียง)</b><br>
+    <span style='color:#404040;'>สีที่อยู่ใกล้กันบนวงล้อสี สร้างความกลมกลืนและดูนุ่มนวล<br>เหมาะกับลุคลำลองและการทำงาน</span>
+    <br>
+    <b>ตัวอย่างคู่สี:</b> <br>
+    <span style='color:#3b82f6;font-weight:700;'>น้ำเงิน</span> + <span style='color:#10b981;font-weight:700;'>เขียว</span> + <span style='color:#38bdf8;font-weight:700;'>ฟ้า</span> &nbsp;|&nbsp; <span style='color:#fbbf24;font-weight:700;'>เหลือง</span> + <span style='color:#f59e42;font-weight:700;'>ส้ม</span> + <span style='color:#ef4444;font-weight:700;'>แดง</span>
+    <br><br>
+    <b>3. Triadic (สีสามเหลี่ยม)</b><br>
+    <span style='color:#404040;'>สีที่ห่างกันเท่าๆ กันบนวงล้อสี สร้างความสมดุลและน่าสนใจ<br>เหมาะกับการแต่งตัวที่ต้องการความสร้างสรรค์</span>
+    <br>
+    <b>ตัวอย่างคู่สี:</b> <br>
+    <span style='color:#ef4444;font-weight:700;'>แดง</span> + <span style='color:#10b981;font-weight:700;'>เขียว</span> + <span style='color:#3b82f6;font-weight:700;'>น้ำเงิน</span> &nbsp;|&nbsp; <span style='color:#fbbf24;font-weight:700;'>เหลือง</span> + <span style='color:#6366f1;font-weight:700;'>ม่วง</span> + <span style='color:#f59e42;font-weight:700;'>ส้ม</span>
+    """, unsafe_allow_html=True)
+
+st.markdown('''<div class="footer">
+<span style="font-size:1em;font-weight:600;color:#404040;">พัฒนาโดย Chanaphon Phetnoi</span><br>
+<span style="font-size:0.95em;color:#404040;">รหัสนักศึกษา 664230017 | ห้อง 66/45</span><br>
+<span style="font-size:0.95em;color:#404040;">นักศึกษาสาขาเทคโนโลยีสารสนเทศ</span>
+</div>''', unsafe_allow_html=True)
